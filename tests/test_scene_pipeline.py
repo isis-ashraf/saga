@@ -1,0 +1,96 @@
+from analysis.scene_extractor import SceneExtractor
+from rag.story_index_service import StoryIndexService
+from timeline.timeline_service import TimelineService
+from timeline.character_timeline_service import CharacterTimelineService
+
+
+def build_sample_chapter():
+    paragraphs = []
+    for index in range(1, 25):
+        paragraphs.append(
+            f"Paragraph {index}. Feyre moves through the forest and thinks about the hunt. "
+            f"She watches the snow and tracks the wolf through the trees for several moments. "
+            f"The winter air cuts at her face while she studies every footprint in the brush."
+        )
+
+    return {
+        "book_index": 1,
+        "chapter_index": 1,
+        "chapter_title": "Chapter 1",
+        "content": "\n\n".join(paragraphs),
+        "source_file": "sample.epub",
+    }
+
+
+def build_sample_scene_analyses():
+    return [
+        {
+            "book_index": 1,
+            "chapter_index": 1,
+            "scene_index": 1,
+            "length": 220,
+            "text": "Feyre enters the forest and tracks a wolf.",
+            "scene_summary": "Feyre hunts in the forest.",
+            "events": [
+                {
+                    "event_id": "evt_1",
+                    "description": "Feyre enters the forest to hunt.",
+                    "characters": ["Feyre"],
+                    "type": "movement",
+                },
+                {
+                    "event_id": "evt_2",
+                    "description": "Feyre tracks the wolf through the snow.",
+                    "characters": ["Feyre", "Wolf"],
+                    "type": "action",
+                },
+            ],
+        },
+        {
+            "book_index": 1,
+            "chapter_index": 2,
+            "scene_index": 1,
+            "length": 210,
+            "text": "Feyre goes under the mountain to save Tamlin.",
+            "scene_summary": "Feyre travels under the mountain to save Tamlin.",
+            "events": [
+                {
+                    "event_id": "evt_1",
+                    "description": "Feyre goes under the mountain to save Tamlin.",
+                    "characters": ["Feyre", "Tamlin"],
+                    "type": "movement",
+                }
+            ],
+        },
+    ]
+
+
+def test_scene_size_presets():
+    chapter = build_sample_chapter()
+
+    chapter_mode = SceneExtractor.from_size_level(0).extract(chapter)
+    medium_mode = SceneExtractor.from_size_level(3).extract(chapter)
+
+    assert len(chapter_mode) == 1
+    assert chapter_mode[0]["scene_size_level"] == 0
+    assert len(medium_mode) > 1
+    assert all(item["scene_size_level"] == 3 for item in medium_mode)
+
+
+def test_story_index_search():
+    scene_analyses = build_sample_scene_analyses()
+    timeline = TimelineService().build_from_scene_analyses(scene_analyses)
+    character_timelines = CharacterTimelineService().build(timeline)
+
+    index = StoryIndexService()
+    result = index.build(
+        scene_analyses=scene_analyses,
+        timeline=timeline,
+        character_timelines=character_timelines,
+    )
+
+    assert result["document_count"] >= 4
+
+    matches = index.query("Feyre was going under the mountain to save Tamlin", min_similarity=0.05, max_results=5)
+    assert matches
+    assert any("Tamlin" in item["summary"] or "Tamlin" in item["text"] for item in matches)
