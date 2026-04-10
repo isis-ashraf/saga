@@ -38,8 +38,8 @@
   <g transform="translate(340 66)">
     <text x="0" y="92" fill="#F4FAFF" font-size="104" font-weight="800" font-family="Segoe UI, Arial, sans-serif" letter-spacing="6">S.A.G.A.</text>
     <text x="4" y="148" fill="#78CCFF" font-size="24" font-weight="700" font-family="Segoe UI, Arial, sans-serif" letter-spacing="5">STORY ANALYSIS, GENERATION, AND ARCHIVES</text>
-    <text x="4" y="204" fill="#9DB6CF" font-size="26" font-weight="400" font-family="Segoe UI, Arial, sans-serif">
-      Canon-aware narrative intelligence for analysis, retrieval, timelines, and grounded story creation
+    <text x="4" y="204" fill="#9DB6CF" font-size="24" font-weight="400" font-family="Segoe UI, Arial, sans-serif">
+      Canon-aware narrative intelligence for analysis, retrieval, and grounded story creation
     </text>
   </g>
 </svg>
