@@ -1,0 +1,45 @@
+<svg width="1200" height="320" viewBox="0 0 1200 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sagaCore" x1="38" y1="36" x2="286" y2="282" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9BE7FF"/>
+      <stop offset="0.52" stop-color="#4BB6FF"/>
+      <stop offset="1" stop-color="#1267D9"/>
+    </linearGradient>
+    <linearGradient id="sagaGlow" x1="66" y1="52" x2="255" y2="265" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DDF8FF" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#5ED5FF" stop-opacity="0.18"/>
+    </linearGradient>
+    <filter id="softGlow" x="0" y="0" width="320" height="320" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="320" rx="28" fill="#09111D"/>
+
+  <g transform="translate(20 20)" filter="url(#softGlow)">
+    <circle cx="140" cy="140" r="104" stroke="#1E314E" stroke-width="8"/>
+    <path d="M139 28 A112 112 0 0 1 246 87" stroke="#55C7FF" stroke-width="12" stroke-linecap="round"/>
+    <path d="M252 141 A112 112 0 0 1 195 244" stroke="#55C7FF" stroke-width="12" stroke-linecap="round" opacity="0.92"/>
+    <path d="M141 252 A112 112 0 0 1 36 192" stroke="#55C7FF" stroke-width="12" stroke-linecap="round" opacity="0.8"/>
+    <path d="M28 138 A112 112 0 0 1 84 36" stroke="#55C7FF" stroke-width="12" stroke-linecap="round" opacity="0.68"/>
+
+    <circle cx="140" cy="140" r="64" fill="url(#sagaGlow)" opacity="0.95"/>
+
+    <path d="M195 99C183 85 164 77 141 77C105 77 79 97 79 126C79 157 107 168 138 176C164 183 177 189 177 205C177 222 161 234 136 234C112 234 89 224 73 207"
+      stroke="url(#sagaCore)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M194 98L195 67" stroke="#D9F7FF" stroke-width="8" stroke-linecap="round"/>
+    <path d="M74 206L54 230" stroke="#D9F7FF" stroke-width="8" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(340 66)">
+    <text x="0" y="92" fill="#F4FAFF" font-size="104" font-weight="800" font-family="Segoe UI, Arial, sans-serif" letter-spacing="6">S.A.G.A.</text>
+    <text x="4" y="148" fill="#78CCFF" font-size="24" font-weight="700" font-family="Segoe UI, Arial, sans-serif" letter-spacing="5">STORY ANALYSIS, GENERATION, AND ARCHIVES</text>
+    <text x="4" y="204" fill="#9DB6CF" font-size="26" font-weight="400" font-family="Segoe UI, Arial, sans-serif">
+      Canon-aware narrative intelligence for analysis, retrieval, timelines, and grounded story creation
+    </text>
+  </g>
+</svg>

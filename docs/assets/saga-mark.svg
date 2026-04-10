@@ -1,0 +1,24 @@
+<svg width="512" height="512" viewBox="0 0 320 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="markCore" x1="38" y1="36" x2="286" y2="282" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9BE7FF"/>
+      <stop offset="0.52" stop-color="#4BB6FF"/>
+      <stop offset="1" stop-color="#1267D9"/>
+    </linearGradient>
+    <linearGradient id="markGlow" x1="66" y1="52" x2="255" y2="265" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DDF8FF" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#5ED5FF" stop-opacity="0.18"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="320" rx="56" fill="#09111D"/>
+  <circle cx="160" cy="160" r="104" stroke="#1E314E" stroke-width="8"/>
+  <path d="M159 48 A112 112 0 0 1 266 107" stroke="#55C7FF" stroke-width="12" stroke-linecap="round"/>
+  <path d="M272 161 A112 112 0 0 1 215 264" stroke="#55C7FF" stroke-width="12" stroke-linecap="round" opacity="0.92"/>
+  <path d="M161 272 A112 112 0 0 1 56 212" stroke="#55C7FF" stroke-width="12" stroke-linecap="round" opacity="0.8"/>
+  <path d="M48 158 A112 112 0 0 1 104 56" stroke="#55C7FF" stroke-width="12" stroke-linecap="round" opacity="0.68"/>
+  <circle cx="160" cy="160" r="64" fill="url(#markGlow)" opacity="0.95"/>
+  <path d="M215 119C203 105 184 97 161 97C125 97 99 117 99 146C99 177 127 188 158 196C184 203 197 209 197 225C197 242 181 254 156 254C132 254 109 244 93 227"
+    stroke="url(#markCore)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M214 118L215 87" stroke="#D9F7FF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M94 226L74 250" stroke="#D9F7FF" stroke-width="8" stroke-linecap="round"/>
+</svg>
