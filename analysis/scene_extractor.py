@@ -1,95 +1,209 @@
-"""Deterministic chapter-to-scene chunking utilities."""
+"""Deterministic text chunking utilities for scene-sized narrative segments."""
 
 import re
 from typing import Dict, List
 
 
 class SceneExtractor:
-    """
-    Splits chapter text into ordered scene-sized chunks without using an LLM.
-    """
+    """Split chapter text into ordered chunks without using an LLM.
 
-    SIZE_PRESETS = {
-        0: None,
-        1: {"target_min_words": 180, "target_max_words": 280, "min_scene_words": 90},
-        2: {"target_min_words": 320, "target_max_words": 480, "min_scene_words": 140},
-        3: {"target_min_words": 500, "target_max_words": 800, "min_scene_words": 180},
-        4: {"target_min_words": 800, "target_max_words": 1200, "min_scene_words": 260},
-    }
+    The extractor now targets an approximate word count instead of a small set
+    of presets. When the target size is larger than an individual chapter, the
+    extractor can continue accumulating paragraphs from subsequent chapters so a
+    single scene chunk may span chapter boundaries.
+    """
 
     def __init__(
         self,
-        target_min_words: int = 500,
-        target_max_words: int = 800,
-        min_scene_words: int = 180,
-        scene_size_level: int = 3,
+        target_words: int = 700,
+        target_min_words: int | None = None,
+        target_max_words: int | None = None,
+        min_scene_words: int | None = None,
     ):
-        self.target_min_words = target_min_words
-        self.target_max_words = target_max_words
-        self.min_scene_words = min_scene_words
-        self.scene_size_level = scene_size_level
+        target_words = max(0, int(target_words))
+        self.target_words = target_words
+        if self.target_words == 0:
+            self.target_min_words = 0
+            self.target_max_words = 0
+            self.min_scene_words = 0
+        else:
+            self.target_min_words = target_min_words or max(100, int(target_words * 0.75))
+            self.target_max_words = target_max_words or max(self.target_min_words + 40, int(target_words * 1.2))
+            self.min_scene_words = min_scene_words or max(90, int(target_words * 0.45))
 
     @classmethod
-    def from_size_level(cls, scene_size_level: int) -> "SceneExtractor":
-        preset = cls.SIZE_PRESETS.get(scene_size_level)
-        if preset is None:
-            return cls(scene_size_level=0)
-
-        return cls(
-            target_min_words=preset["target_min_words"],
-            target_max_words=preset["target_max_words"],
-            min_scene_words=preset["min_scene_words"],
-            scene_size_level=scene_size_level,
-        )
+    def from_target_words(cls, target_words: int) -> "SceneExtractor":
+        return cls(target_words=target_words)
 
     def extract(self, chapter: Dict) -> List[Dict]:
-        paragraphs = self._split_paragraphs(chapter.get("content", ""))
-        if not paragraphs:
-            return []
+        if self.target_words == 0:
+            paragraphs = self._split_paragraphs(chapter.get("content", ""))
+            if not paragraphs:
+                return []
 
-        if self.scene_size_level == 0:
             chapter_text = "\n\n".join(paragraphs).strip()
             chapter_length = self._word_count(chapter_text)
             if not chapter_length:
                 return []
 
+            source_file = chapter.get("source_file", "")
             return [{
                 "book_index": chapter["book_index"],
                 "chapter_index": chapter["chapter_index"],
+                "chapter_title": chapter.get("chapter_title", ""),
                 "scene_index": 1,
                 "text": chapter_text,
                 "length": chapter_length,
-                "scene_size_level": self.scene_size_level,
+                "target_words": self.target_words,
+                "source_chapter_indices": [chapter["chapter_index"]],
+                "end_chapter_index": chapter["chapter_index"],
+                "source_files": [source_file] if source_file else [],
             }]
+        return self.extract_many([chapter], allow_cross_chapter=False)
 
-        chunks = self._build_chunks(paragraphs)
-        chunks = self._merge_small_chunks(chunks)
+    def extract_many(self, chapters: List[Dict], allow_cross_chapter: bool = True) -> List[Dict]:
+        if self.target_words == 0:
+            scenes: List[Dict] = []
+            for chapter in chapters:
+                scenes.extend(self.extract(chapter))
+            return scenes
 
-        scenes = []
+        paragraph_records: List[Dict] = []
+        for chapter in chapters:
+            chapter_paragraphs = self._split_paragraphs(chapter.get("content", ""))
+            for paragraph in chapter_paragraphs:
+                paragraph_records.append({
+                    "book_index": chapter["book_index"],
+                    "chapter_index": chapter["chapter_index"],
+                    "chapter_title": chapter.get("chapter_title", ""),
+                    "source_file": chapter.get("source_file", ""),
+                    "paragraph": paragraph,
+                    "word_count": self._word_count(paragraph),
+                })
 
-        for scene_index, text in enumerate(chunks, start=1):
-            length = self._word_count(text)
-            if not length:
-                continue
+        return self._build_scene_records(paragraph_records, allow_cross_chapter=allow_cross_chapter)
 
-            scenes.append({
-                "book_index": chapter["book_index"],
-                "chapter_index": chapter["chapter_index"],
-                "scene_index": scene_index,
-                "text": text,
-                "length": length,
-                "scene_size_level": self.scene_size_level,
+    def split_scene(self, scene: Dict, target_words: int) -> List[Dict]:
+        extractor = SceneExtractor.from_target_words(target_words)
+        paragraphs = extractor._split_paragraphs(scene.get("text", ""))
+        paragraph_records = []
+        source_chapters = scene.get("source_chapter_indices") or [scene.get("chapter_index")]
+        source_files = scene.get("source_files") or ([scene.get("source_file")] if scene.get("source_file") else [])
+        for paragraph in paragraphs:
+            paragraph_records.append({
+                "book_index": scene["book_index"],
+                "chapter_index": scene["chapter_index"],
+                "chapter_title": scene.get("chapter_title", ""),
+                "source_file": source_files[0] if source_files else "",
+                "paragraph": paragraph,
+                "word_count": extractor._word_count(paragraph),
             })
 
-        return scenes
+        split_records = extractor._build_scene_records(paragraph_records, allow_cross_chapter=False)
+        for index, item in enumerate(split_records, start=1):
+            item["book_index"] = scene["book_index"]
+            item["chapter_index"] = scene["chapter_index"]
+            item["scene_index"] = index
+            item["source_chapter_indices"] = source_chapters
+            item["end_chapter_index"] = scene.get("end_chapter_index", scene["chapter_index"])
+            item["source_files"] = source_files
+        return split_records
 
-    def extract_many(self, chapters: List[Dict]) -> List[Dict]:
-        scenes = []
+    def _build_scene_records(self, paragraph_records: List[Dict], allow_cross_chapter: bool) -> List[Dict]:
+        if not paragraph_records:
+            return []
 
-        for chapter in chapters:
-            scenes.extend(self.extract(chapter))
+        scenes: List[Dict] = []
+        current_records: List[Dict] = []
+        current_words = 0
 
-        return scenes
+        for record in paragraph_records:
+            if not allow_cross_chapter and current_records:
+                previous_chapter = current_records[-1]["chapter_index"]
+                if record["chapter_index"] != previous_chapter:
+                    scenes.append(self._records_to_scene(current_records))
+                    current_records = []
+                    current_words = 0
+
+            projected_words = current_words + record["word_count"]
+            if current_records and current_words >= self.target_min_words and projected_words > self.target_max_words:
+                scenes.append(self._records_to_scene(current_records))
+                current_records = [record]
+                current_words = record["word_count"]
+                continue
+
+            current_records.append(record)
+            current_words = projected_words
+
+        if current_records:
+            scenes.append(self._records_to_scene(current_records))
+
+        scenes = self._merge_small_scenes(scenes, allow_cross_chapter=allow_cross_chapter)
+        return self._reindex_scenes(scenes)
+
+    def _records_to_scene(self, records: List[Dict]) -> Dict:
+        text = "\n\n".join(record["paragraph"] for record in records).strip()
+        chapter_indices = [record["chapter_index"] for record in records]
+        source_files = sorted({record.get("source_file", "") for record in records if record.get("source_file")})
+        return {
+            "book_index": records[0]["book_index"],
+            "chapter_index": records[0]["chapter_index"],
+            "chapter_title": records[0].get("chapter_title", ""),
+            "scene_index": 1,
+            "text": text,
+            "length": self._word_count(text),
+            "target_words": self.target_words,
+            "source_chapter_indices": sorted(set(chapter_indices)),
+            "end_chapter_index": chapter_indices[-1],
+            "source_files": source_files,
+        }
+
+    def _merge_small_scenes(self, scenes: List[Dict], allow_cross_chapter: bool) -> List[Dict]:
+        if not scenes:
+            return []
+
+        merged: List[Dict] = []
+        for scene in scenes:
+            if not merged:
+                merged.append(scene)
+                continue
+
+            same_book = merged[-1]["book_index"] == scene["book_index"]
+            cross_ok = allow_cross_chapter or merged[-1]["chapter_index"] == scene["chapter_index"]
+            if scene["length"] < self.min_scene_words and same_book and cross_ok:
+                merged[-1] = self._combine_scenes(merged[-1], scene)
+            else:
+                merged.append(scene)
+
+        if len(merged) > 1 and merged[0]["length"] < self.min_scene_words:
+            merged[1] = self._combine_scenes(merged[0], merged[1])
+            merged = merged[1:]
+
+        return merged
+
+    def _combine_scenes(self, left: Dict, right: Dict) -> Dict:
+        combined_text = f"{left['text']}\n\n{right['text']}".strip()
+        return {
+            **left,
+            "text": combined_text,
+            "length": self._word_count(combined_text),
+            "target_words": self.target_words,
+            "end_chapter_index": right.get("end_chapter_index", right["chapter_index"]),
+            "source_chapter_indices": sorted(set((left.get("source_chapter_indices") or [left["chapter_index"]]) + (right.get("source_chapter_indices") or [right["chapter_index"]]))),
+            "source_files": sorted(set((left.get("source_files") or []) + (right.get("source_files") or []))),
+        }
+
+    def _reindex_scenes(self, scenes: List[Dict]) -> List[Dict]:
+        by_anchor: dict[tuple[int, int], int] = {}
+        reindexed = []
+        for scene in scenes:
+            key = (scene["book_index"], scene["chapter_index"])
+            by_anchor[key] = by_anchor.get(key, 0) + 1
+            reindexed.append({
+                **scene,
+                "scene_index": by_anchor[key],
+            })
+        return reindexed
 
     def _split_paragraphs(self, text: str) -> List[str]:
         text = (text or "").strip()
@@ -105,51 +219,6 @@ class SceneExtractor:
                 merged[-1] = f"{merged[-1]} {paragraph}".strip()
             else:
                 merged.append(paragraph)
-
-        return merged
-
-    def _build_chunks(self, paragraphs: List[str]) -> List[str]:
-        chunks = []
-        current = []
-        current_words = 0
-
-        for paragraph in paragraphs:
-            paragraph_words = self._word_count(paragraph)
-            projected_words = current_words + paragraph_words
-
-            if current and current_words >= self.target_min_words and projected_words > self.target_max_words:
-                chunks.append("\n\n".join(current))
-                current = [paragraph]
-                current_words = paragraph_words
-                continue
-
-            current.append(paragraph)
-            current_words = projected_words
-
-        if current:
-            chunks.append("\n\n".join(current))
-
-        return chunks
-
-    def _merge_small_chunks(self, chunks: List[str]) -> List[str]:
-        if not chunks:
-            return []
-
-        merged = []
-
-        for chunk in chunks:
-            if not merged:
-                merged.append(chunk)
-                continue
-
-            if self._word_count(chunk) < self.min_scene_words:
-                merged[-1] = f"{merged[-1]}\n\n{chunk}".strip()
-            else:
-                merged.append(chunk)
-
-        if len(merged) > 1 and self._word_count(merged[0]) < self.min_scene_words:
-            merged[1] = f"{merged[0]}\n\n{merged[1]}".strip()
-            merged = merged[1:]
 
         return merged
 

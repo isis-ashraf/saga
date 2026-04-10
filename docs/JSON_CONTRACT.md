@@ -27,8 +27,7 @@ The dashboard export produces a single JSON document representing the current S.
 
 - `analysis_model`
 - `identity_model`
-- `scene_size_level`
-- `scene_size_label`
+- `target_scene_words`
 
 ### `inputs`
 
@@ -60,3 +59,4 @@ The dashboard export produces a single JSON document representing the current S.
 
 - The export intentionally excludes live service objects such as in-memory query/index instances.
 - The export is suitable for saving, sharing, and downstream automation.
+- `target_scene_words = 0` means one full chapter per scene.

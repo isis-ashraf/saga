@@ -32,13 +32,7 @@ from timeline.timeline_service import TimelineService
 
 
 UPLOAD_DIR = Path(r"B:\Documents\PyCharm\graduationProject\uploads")
-SCENE_SIZE_LABELS = {
-    0: "Entire chapter",
-    1: "Small",
-    2: "Medium-small",
-    3: "Medium",
-    4: "Large",
-}
+DEFAULT_SCENE_TARGET_WORDS = 900
 MODEL_OPTIONS = ["gpt_oss", "deepseek", "mistral", "gemini"]
 LIVE_RENDER_INTERVAL_SECONDS = 2.0
 EXPORT_CONTRACT_VERSION = "1.0.0"
@@ -90,7 +84,7 @@ def init_state():
         "causal_graph_result": {"graph": {"events": [], "critical_path": [], "flexible_events": [], "causal_chains": [], "divergence_points": []}, "metrics": {}},
         "analysis_model": "gpt_oss",
         "identity_model": "deepseek",
-        "scene_size_level": 3,
+        "target_scene_words": DEFAULT_SCENE_TARGET_WORDS,
         "book_order_rows": [],
         "pipeline_running": False,
         "latest_status": "Idle",
@@ -103,6 +97,7 @@ def init_state():
         "last_scene_seconds": 0.0,
         "avg_scene_seconds": 0.0,
         "last_live_render_at": 0.0,
+        "post_run_refresh_pending": False,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -131,6 +126,7 @@ def reset_pipeline_outputs():
     st.session_state["last_scene_seconds"] = 0.0
     st.session_state["avg_scene_seconds"] = 0.0
     st.session_state["last_live_render_at"] = 0.0
+    st.session_state["post_run_refresh_pending"] = False
 
 
 def save_uploaded_books(uploaded_files) -> List[Dict]:
@@ -682,8 +678,7 @@ def build_export_contract() -> Dict:
         "configuration": {
             "analysis_model": st.session_state.get("analysis_model"),
             "identity_model": st.session_state.get("identity_model"),
-            "scene_size_level": st.session_state.get("scene_size_level"),
-            "scene_size_label": SCENE_SIZE_LABELS.get(st.session_state.get("scene_size_level")),
+            "target_scene_words": st.session_state.get("target_scene_words"),
         },
         "inputs": {
             "books": st.session_state.get("book_inputs") or [],
@@ -715,6 +710,15 @@ def build_export_contract() -> Dict:
 
 def export_contract_json() -> str:
     return json.dumps(build_export_contract(), ensure_ascii=False, indent=2)
+
+
+def has_exportable_outputs() -> bool:
+    return bool(
+        st.session_state.get("chapters")
+        or st.session_state.get("scene_analyses")
+        or st.session_state.get("timeline")
+        or st.session_state.get("entity_registry")
+    )
 
 
 def build_causal_graph(timeline: List[Dict], scene_analyses: List[Dict], model_mode: str) -> Dict:
@@ -759,40 +763,42 @@ def is_overflow_error(result: Dict) -> bool:
     return any(keyword in error_blob for keyword in ["context", "token", "overflow", "length", "too long", "prompt"])
 
 
-def next_smaller_scene_size(scene_size_level: int) -> int | None:
-    if scene_size_level == 0:
-        return 4
-    if scene_size_level > 1:
-        return scene_size_level - 1
-    return None
+def next_smaller_scene_target(target_words: int) -> int | None:
+    if target_words == 0:
+        return DEFAULT_SCENE_TARGET_WORDS
+    smaller = int(target_words * 0.75)
+    if smaller >= target_words:
+        smaller = target_words - 100
+    if smaller < 180:
+        return None
+    return smaller
 
 
-def analyze_chapter_with_fallback(
-    chapter: Dict,
-    scene_size_level: int,
+def analyze_scene_with_fallback(
+    scene: Dict,
+    target_scene_words: int,
     analysis_model: str,
     identity_model: str,
     alias_result: Dict,
     state_result: Dict,
     resolved_scene_analyses: List[Dict],
 ) -> Tuple[List[Dict], List[int]]:
-    current_level = scene_size_level
-    attempted_levels = []
+    current_target = target_scene_words
+    attempted_targets = []
     content_client = LLMClient(mode=analysis_model)
     identity_client = LLMClient(mode=identity_model)
+    working_scenes = [scene]
 
-    while current_level is not None:
-        attempted_levels.append(current_level)
-        extractor = SceneExtractor.from_size_level(current_level)
-        chapter_scenes = extractor.extract(chapter)
+    while current_target is not None:
+        attempted_targets.append(current_target)
         analyzer = SceneAnalyzer(llm_client=content_client)
         identity_analyzer = IdentityAnalyzer(llm_client=identity_client)
         analyzed = []
         overflow_triggered = False
 
-        for index, scene in enumerate(chapter_scenes, start=1):
+        for current_scene in working_scenes:
             scene_context = build_scene_context(
-                scene.get("text", ""),
+                current_scene.get("text", ""),
                 resolved_scene_analyses,
                 state_result,
                 alias_result,
@@ -801,14 +807,14 @@ def analyze_chapter_with_fallback(
             with ThreadPoolExecutor(max_workers=2) as executor:
                 content_future = executor.submit(
                     analyzer.analyze,
-                    scene,
+                    current_scene,
                     alias_map=alias_result["alias_map"],
                     rejected_identities=alias_result["rejected_non_characters"],
                     scene_context=scene_context,
                 )
                 identity_future = executor.submit(
                     identity_analyzer.analyze,
-                    scene,
+                    current_scene,
                     alias_map=alias_result["alias_map"],
                     rejected_identities=alias_result["rejected_non_characters"],
                     scene_context=scene_context,
@@ -816,23 +822,29 @@ def analyze_chapter_with_fallback(
                 content_result = content_future.result()
                 identity_result = identity_future.result()
             elapsed_seconds = time.perf_counter() - started_at
-            result = merge_scene_outputs(scene, content_result, identity_result, elapsed_seconds)
+            result = merge_scene_outputs(current_scene, content_result, identity_result, elapsed_seconds)
             if result.get("error") and is_overflow_error(result):
                 overflow_triggered = True
                 break
             analyzed.append(result)
 
         if not overflow_triggered:
-            return analyzed, attempted_levels
+            return analyzed, attempted_targets
 
-        current_level = next_smaller_scene_size(current_level)
+        current_target = next_smaller_scene_target(current_target)
+        if current_target is not None:
+            extractor = SceneExtractor.from_target_words(current_target)
+            next_working_scenes = []
+            for item in working_scenes:
+                next_working_scenes.extend(extractor.split_scene(item, current_target))
+            working_scenes = next_working_scenes
 
     fallback_error = {
-        "book_index": chapter["book_index"],
-        "chapter_index": chapter["chapter_index"],
+        "book_index": scene["book_index"],
+        "chapter_index": scene["chapter_index"],
         "scene_index": 1,
-        "length": len(chapter.get("content", "").split()),
-        "text": chapter.get("content", ""),
+        "length": len(scene.get("text", "").split()),
+        "text": scene.get("text", ""),
         "scene_summary": "",
         "events": [],
         "entities_present": [],
@@ -847,9 +859,9 @@ def analyze_chapter_with_fallback(
         "rejected_identity_candidates": [],
         "error": "context_overflow_unresolved",
         "last_error": "",
-        "fallback_levels": attempted_levels,
+        "fallback_targets": attempted_targets,
     }
-    return [fallback_error], attempted_levels
+    return [fallback_error], attempted_targets
 
 
 def render_books(container, book_inputs: List[Dict]):
@@ -891,8 +903,12 @@ def render_scenes(container, scene_analyses: List[Dict], compact: bool):
         st.write(f"Scenes: {len(scene_analyses)}")
         items = scene_analyses[-3:] if compact else paged_items(scene_analyses, "scenes", page_size=6)
         for scene in items:
-            with st.expander(f"Book {scene['book_index']} | Chapter {scene['chapter_index']} | Scene {scene['scene_index']}"):
-                st.write(f"Fallback levels tried: {[SCENE_SIZE_LABELS.get(level, level) for level in scene.get('fallback_levels', [])]}")
+            chapter_label = f"Chapter {scene['chapter_index']}"
+            if scene.get("end_chapter_index") and scene.get("end_chapter_index") != scene["chapter_index"]:
+                chapter_label = f"Chapters {scene['chapter_index']}-{scene['end_chapter_index']}"
+            with st.expander(f"Book {scene['book_index']} | {chapter_label} | Scene {scene['scene_index']}"):
+                if scene.get("fallback_targets"):
+                    st.write(f"Fallback target words tried: {scene.get('fallback_targets')}")
                 if scene.get("error"):
                     st.warning(f"Analysis error: {scene['error']} | {scene.get('last_error', '')}")
                 st.write(f"Summary: {scene.get('scene_summary') or 'None'}")
@@ -1189,6 +1205,8 @@ def render_all(placeholders: Dict[str, st.delta_generator.DeltaGenerator], compa
 
 
 init_state()
+if st.session_state.get("post_run_refresh_pending"):
+    st.session_state["post_run_refresh_pending"] = False
 st.title("S.A.G.A.")
 st.caption("Story Analysis, Generation, and Archives")
 st.caption("Run the full one-pass pipeline with live downstream updates after each analyzed scene.")
@@ -1236,20 +1254,29 @@ with st.sidebar:
 
     st.selectbox("Scene analysis model", MODEL_OPTIONS, key="analysis_model")
     st.selectbox("Identity model", MODEL_OPTIONS, key="identity_model")
-    st.slider("Scene size", min_value=0, max_value=4, step=1, key="scene_size_level")
-    st.caption(f"Scene size: {SCENE_SIZE_LABELS[st.session_state['scene_size_level']]}")
+    st.slider("Target scene size (words)", min_value=0, max_value=5000, key="target_scene_words")
+    if st.session_state["target_scene_words"] == 0:
+        st.caption("Scene size 0 means one full chapter per scene.")
+    else:
+        st.caption("Chunks can span chapter boundaries when the target size is larger than a single chapter.")
 
     run_clicked = st.button("Run Pipeline", width="stretch")
     reset_clicked = st.button("Reset Results", width="stretch")
 
-    if st.session_state.get("chapters"):
-        st.download_button(
-            label="Export JSON Contract",
-            data=export_contract_json(),
-            file_name="saga_contract.json",
-            mime="application/json",
-            width="stretch",
-        )
+    export_ready = has_exportable_outputs() and not st.session_state.get("pipeline_running")
+    st.download_button(
+        label="Export JSON Contract",
+        data=export_contract_json() if has_exportable_outputs() else "{}",
+        file_name="saga_contract.json",
+        mime="application/json",
+        width="stretch",
+        key="sidebar_export_json_contract",
+        disabled=not export_ready,
+    )
+    if not has_exportable_outputs():
+        st.caption("Run the pipeline to enable JSON export.")
+    elif st.session_state.get("pipeline_running"):
+        st.caption("JSON export will be enabled when the current run finishes.")
 
     if reset_clicked:
         reset_pipeline_outputs()
@@ -1277,28 +1304,33 @@ if run_clicked:
 
     chapters = build_chapters(st.session_state["book_inputs"], st.session_state["analysis_model"])
     st.session_state["chapters"] = chapters
-    base_extractor = SceneExtractor.from_size_level(st.session_state["scene_size_level"])
-    chapter_scene_plan = [len(base_extractor.extract(chapter)) for chapter in chapters]
-    st.session_state["estimated_total_scenes"] = sum(chapter_scene_plan)
+    base_extractor = SceneExtractor.from_target_words(st.session_state["target_scene_words"])
+    planned_scenes = base_extractor.extract_many(chapters, allow_cross_chapter=True)
+    st.session_state["estimated_total_scenes"] = len(planned_scenes)
     render_all(placeholders, compact=True)
     st.session_state["last_live_render_at"] = time.perf_counter()
 
     progress = st.sidebar.progress(0.0)
-    total_chapters = len(chapters)
+    total_scenes = len(planned_scenes)
 
-    for chapter_position, chapter in enumerate(chapters, start=1):
-        st.session_state["latest_status"] = f"Processing chapter {chapter_position}/{total_chapters}: {chapter['chapter_title']}"
+    for scene_position, planned_scene in enumerate(planned_scenes, start=1):
+        chapter_label = f"Chapter {planned_scene['chapter_index']}"
+        if planned_scene.get("end_chapter_index") and planned_scene["end_chapter_index"] != planned_scene["chapter_index"]:
+            chapter_label = f"Chapters {planned_scene['chapter_index']}-{planned_scene['end_chapter_index']}"
+        st.session_state["latest_status"] = f"Processing scene {scene_position}/{total_scenes}: {chapter_label}"
         logging.info(
-            "Chapter analysis started | position=%s/%s | book=%s | chapter=%s | title=%s",
-            chapter_position,
-            total_chapters,
-            chapter["book_index"],
-            chapter["chapter_index"],
-            chapter["chapter_title"],
+            "Scene analysis started | position=%s/%s | book=%s | chapter=%s | end_chapter=%s | scene=%s | target_words=%s",
+            scene_position,
+            total_scenes,
+            planned_scene["book_index"],
+            planned_scene["chapter_index"],
+            planned_scene.get("end_chapter_index", planned_scene["chapter_index"]),
+            planned_scene["scene_index"],
+            st.session_state["target_scene_words"],
         )
-        analyzed_scenes, attempted_levels = analyze_chapter_with_fallback(
-            chapter,
-            st.session_state["scene_size_level"],
+        analyzed_scenes, attempted_targets = analyze_scene_with_fallback(
+            planned_scene,
+            st.session_state["target_scene_words"],
             st.session_state["analysis_model"],
             st.session_state["identity_model"],
             st.session_state["identity_result"],
@@ -1307,7 +1339,7 @@ if run_clicked:
         )
 
         for scene_analysis in analyzed_scenes:
-            scene_analysis["fallback_levels"] = attempted_levels
+            scene_analysis["fallback_targets"] = attempted_targets
             apply_identity_updates(scene_analysis, st.session_state["identity_result"])
             st.session_state["scene_analyses"].append(scene_analysis)
             st.session_state["resolved_scene_analyses"] = rebuild_resolved_scene_analyses(
@@ -1329,7 +1361,10 @@ if run_clicked:
             total_elapsed = time.perf_counter() - float(st.session_state.get("run_started_at") or 0.0)
             st.session_state["elapsed_seconds"] = round(total_elapsed, 2)
             st.session_state["avg_scene_seconds"] = round(total_elapsed / processed, 2)
-            st.session_state["current_scene_ref"] = f"Book {scene_analysis['book_index']} | Chapter {scene_analysis['chapter_index']} | Scene {scene_analysis['scene_index']}"
+            current_chapter_label = f"Chapter {scene_analysis['chapter_index']}"
+            if scene_analysis.get("end_chapter_index") and scene_analysis["end_chapter_index"] != scene_analysis["chapter_index"]:
+                current_chapter_label = f"Chapters {scene_analysis['chapter_index']}-{scene_analysis['end_chapter_index']}"
+            st.session_state["current_scene_ref"] = f"Book {scene_analysis['book_index']} | {current_chapter_label} | Scene {scene_analysis['scene_index']}"
             st.session_state["latest_scene_summary"] = scene_analysis.get("scene_summary") or "No summary"
             st.session_state["canon_snapshot"] = build_canon_snapshot(
                 st.session_state["state_result"],
@@ -1346,18 +1381,17 @@ if run_clicked:
             )
             render_all_throttled(placeholders, compact=True)
 
-        planned_for_chapter = chapter_scene_plan[chapter_position - 1] if chapter_position - 1 < len(chapter_scene_plan) else 0
-        actual_for_chapter = len(analyzed_scenes)
-        if actual_for_chapter != planned_for_chapter:
-            st.session_state["estimated_total_scenes"] += actual_for_chapter - planned_for_chapter
         logging.info(
-            "Chapter analysis completed | book=%s | chapter=%s | scenes=%s | attempted_levels=%s",
-            chapter["book_index"],
-            chapter["chapter_index"],
-            actual_for_chapter,
-            attempted_levels,
+            "Scene analysis completed | book=%s | chapter=%s | end_chapter=%s | produced=%s | attempted_targets=%s",
+            planned_scene["book_index"],
+            planned_scene["chapter_index"],
+            planned_scene.get("end_chapter_index", planned_scene["chapter_index"]),
+            len(analyzed_scenes),
+            attempted_targets,
         )
-        progress.progress(chapter_position / total_chapters if total_chapters else 1.0)
+        if len(analyzed_scenes) != 1:
+            st.session_state["estimated_total_scenes"] += len(analyzed_scenes) - 1
+        progress.progress(scene_position / total_scenes if total_scenes else 1.0)
         render_all_throttled(placeholders, compact=True, force=True)
 
     st.session_state["latest_status"] = "Building causal graph..."
@@ -1389,3 +1423,5 @@ if run_clicked:
     else:
         st.session_state["latest_status"] = "Pipeline completed."
     render_all(placeholders, compact=False)
+    st.session_state["post_run_refresh_pending"] = True
+    st.rerun()

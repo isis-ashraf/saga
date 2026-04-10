@@ -20,7 +20,8 @@ The main product surface is the Streamlit dashboard in [story_dashboard.py](/B:/
 ## Main Features
 
 - Unified series ingestion through EPUB and PDF processors
-- Configurable scene sizing, including entire-chapter mode
+- Continuous target-word scene sizing with `0 = one full chapter per scene`
+- Cross-chapter chunk merging for nonzero target sizes
 - Parallel scene analysis and identity analysis
 - Incremental alias-map updates during processing
 - Deterministic downstream rebuilding after each scene
@@ -68,14 +69,16 @@ pip install -e .[dev]
 
 ## Dashboard Workflow
 
-1. Upload one or more books, or use the default sample.
+1. Upload one or more EPUB or PDF books.
 2. Choose:
    - scene analysis model
    - identity model
-   - scene size
+   - target scene size in words
+     - `0` means one full chapter per scene
+     - values above `0` can merge across chapter boundaries when needed
 3. Click `Run Pipeline`.
 4. Review outputs in the dashboard tabs.
-5. Export the pipeline result using `Export JSON Contract`.
+5. Export the pipeline result using `Export JSON Contract` from the sidebar after the run completes.
 
 ## JSON Export
 

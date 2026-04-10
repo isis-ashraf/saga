@@ -19,10 +19,17 @@ The dashboard is no longer just a review tool. It is the primary operational sur
 - Reorder books
 - Select scene analysis model
 - Select identity model
-- Choose scene size
+- Choose target scene size in words
 - Run pipeline
 - Reset results
 - Export JSON contract
+
+## Scene Sizing
+
+- `0` means one full chapter per scene
+- any value above `0` is treated as a target word count
+- nonzero target sizes can produce chunks that span chapter boundaries
+- chunks still respect paragraph boundaries and do not break mid-paragraph or mid-sentence
 
 ## Key Tabs
 
@@ -57,4 +64,4 @@ The dashboard is no longer just a review tool. It is the primary operational sur
 
 ## Export
 
-Use the `Export JSON Contract` button in the sidebar after a run has produced chapters. The file is meant to be stable enough for handoff to downstream tools and integrations.
+Use the `Export JSON Contract` button in the sidebar after the pipeline run completes. The file is meant to be stable enough for handoff to downstream tools and integrations.
