@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 import requests
 from google import genai
-from mistralai import Mistral
+from mistralai import MistralClient
 
 
 class LLMClient:
@@ -61,7 +61,7 @@ class LLMClient:
         if self.mode == self.MODE_MISTRAL:
             if not self.mistral_api_key:
                 raise ValueError("MISTRAL_API_KEY not set")
-            self.mistral_client = Mistral(api_key=self.mistral_api_key)
+            self.mistral_client = MistralClient(api_key=self.mistral_api_key)
 
         if self.mode == self.MODE_GEMINI:
             if not self.gemini_api_key:
