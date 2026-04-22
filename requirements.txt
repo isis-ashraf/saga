@@ -1,0 +1,10 @@
+streamlit
+beautifulsoup4
+ebooklib
+google-genai
+mistralai
+pypdf
+PyMuPDF
+requests
+scikit-learn
+trafilatura
