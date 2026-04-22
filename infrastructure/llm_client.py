@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 import requests
 from google import genai
-from mistralai import MistralClient
+from mistralai.client import MistralClient
 
 
 class LLMClient:

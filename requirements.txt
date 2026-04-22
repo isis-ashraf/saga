@@ -2,7 +2,7 @@ streamlit
 beautifulsoup4
 ebooklib
 google-genai
-mistralai
+mistralai==0.4.2 
 pypdf
 PyMuPDF
 requests
