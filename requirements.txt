@@ -2,9 +2,10 @@ streamlit
 beautifulsoup4
 ebooklib
 google-genai
-mistralai==0.4.2 
+mistralai==0.4.2
 pypdf
 PyMuPDF
 requests
 scikit-learn
 trafilatura
+orjson==3.10.7
